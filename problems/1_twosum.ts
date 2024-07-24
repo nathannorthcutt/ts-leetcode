@@ -2,7 +2,7 @@
  * https://leetcode.com/problems/two-sum/description/
  */
 
-import type { Increment, Subtract } from "../utils/numbers.js";
+import type { Increment, Subtract } from "../utils/math.js";
 
 /** Solve the two sums problem */
 export type TwoSum<
