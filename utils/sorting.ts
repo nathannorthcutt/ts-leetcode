@@ -1,4 +1,4 @@
-import type { Add, Decrement, GT, Increment, LT } from "./math.js";
+import type { Add, Decrement, GT, Increment, LT, LTE } from "./math.js";
 
 /**
  * Defines keys that are valid for sorting
@@ -72,11 +72,7 @@ type Swap<
 /**
  * "Mulitiply" the number by 2
  */
-type TwoN<Index extends number> = Add<0, Index> extends infer N extends number
-  ? Add<N, Index> extends infer N2 extends number
-    ? N2
-    : never
-  : never;
+type TwoN<Index extends number> = Add<Index, Index>;
 
 /**
  * "Divide" the number by 2
@@ -143,9 +139,9 @@ type SiftDown<
   Idx extends number,
   Limit extends number
 > = LeftChild<Idx> extends infer LC extends number
-  ? LT<LC, Limit> extends true
+  ? LTE<LC, Limit> extends true
     ? RightChild<Idx> extends infer RC extends number
-      ? LT<RC, Limit> extends true
+      ? LTE<RC, Limit> extends true
         ? GT<Arr[LC]["value"], Arr[RC]["value"]> extends true // Have to check GT of left or right
           ? LT<Arr[Idx]["value"], Arr[LC]["value"]> extends true
             ? Swap<Arr, Idx, LC> extends infer _ extends HeapSortItem[]
@@ -167,7 +163,7 @@ type SiftDown<
   : never; // left child is always a number
 
 /**
- * Heapify the array one element ta a time
+ * Heapify the array one element at a time
  */
 type Heapify<
   Arr extends HeapSortItem[],
