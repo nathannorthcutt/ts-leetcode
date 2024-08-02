@@ -110,8 +110,6 @@ export type Add<L extends number, R extends number> = L extends 0
   ? Subtract<R, Abs<L>> // -l + r = r - l
   : Subtract<L, Abs<R>>; // l + (-r) = l - r
 
-// 77 + 4 = 4 + 7 (11) => 1 carry, 7 + carry = 8 = 81
-
 ////////////////////////////////
 // Utility Methods
 ////////////////////////////////
