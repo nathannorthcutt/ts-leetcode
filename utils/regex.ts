@@ -132,7 +132,7 @@ type NextToken<RegEx extends string> =
     ? ParseRange<Group> extends infer Token extends string
       ? [RegexRangeToken<Token>, Unparsed]
       : "Invalid range"
-    : RegEx extends `${infer Special extends REGEX_SPECIAL}${infer Unparsed}`
+    : RegEx extends `${infer Special extends REGEX_SPECIAL_TOKENS}${infer Unparsed}`
     ? [CheckSpecial<Special>, Unparsed]
     : RegEx extends `\\${infer Literal}${infer Unparsed}`
     ? [CheckLiteral<Literal>, Unparsed]
@@ -140,8 +140,10 @@ type NextToken<RegEx extends string> =
     ? [RegexLiteralToken<Literal>, Unparsed]
     : never;
 
-type REGEX_SPECIAL = "." | "+" | "*" | "?";
+/** Set of special characters */
+type REGEX_SPECIAL_TOKENS = "." | "+" | "*" | "?";
 
+// Special ranges or tokens for matching
 type REGEX_ANY = RegexRangeToken<string>;
 type REGEX_WORD = RegexRangeToken<ParseRange<"a-zA-Z0-9_">>;
 type REGEX_DIGIT = RegexRangeToken<ParseRange<"0-9">>;
@@ -154,7 +156,7 @@ type REGEX_ZERO_OR_ONE = RegexRepeatingToken<never, 0, 1>;
 /**
  * Map special character sets
  */
-type CheckSpecial<Special extends REGEX_SPECIAL> = Special extends "."
+type CheckSpecial<Special extends REGEX_SPECIAL_TOKENS> = Special extends "."
   ? REGEX_ANY
   : Special extends "+"
   ? REGEX_ONE_OR_MORE
