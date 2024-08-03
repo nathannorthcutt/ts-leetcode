@@ -18,7 +18,7 @@ export type IsMatch<
   Regex extends string,
   Candidate extends string
 > = RegEx<Regex> extends infer Tokens extends RegexToken[]
-  ? Check<Candidate, Tokens>
+  ? RunStateMachine<Candidate, Tokens>
   : false;
 
 /**
@@ -32,7 +32,7 @@ export type RegEx<Regex extends string> =
 /**
  * Check if the string matches the given tokens
  */
-type Check<
+type RunStateMachine<
   Candidate extends string,
   Tokens,
   N extends number = 0
@@ -45,19 +45,19 @@ type Check<
     ? CheckMatch<NextChar, Token> extends true
       ? Rest extends ""
         ? true
-        : Check<Rest, RemainingTokens>
+        : RunStateMachine<Rest, RemainingTokens>
       : Token extends RegexRepeatingToken<infer RT, infer Min, infer Max>
       ? CheckMatch<NextChar, RT> extends true
-        ? Check<Rest, Tokens, Increment<N>>
+        ? RunStateMachine<Rest, Tokens, Increment<N>>
         : InRange<N, Min, Max> extends true
-        ? Check<Candidate, RemainingTokens>
+        ? RunStateMachine<Candidate, RemainingTokens>
         : "Range exceeded"
-      : Check<Candidate, RemainingTokens>
+      : RunStateMachine<Candidate, RemainingTokens>
     : `exhausted tokens: ${Candidate}` // No more tokens but string remains
   : Tokens extends [infer Token extends RegexToken, ...infer RemainingTokens]
   ? Token extends RegexRepeatingToken<infer _, infer Min, infer Max>
     ? InRange<N, Min, Max> extends true
-      ? Check<Candidate, RemainingTokens>
+      ? RunStateMachine<Candidate, RemainingTokens>
       : "Failed to satisfy range"
     : "string exhausted before tokens consumed"
   : "failed to match regex"; // Invalid string
@@ -132,15 +132,48 @@ type NextToken<RegEx extends string> =
     ? ParseRange<Group> extends infer Token extends string
       ? [RegexRangeToken<Token>, Unparsed]
       : "Invalid range"
-    : RegEx extends `+${infer Unparsed}`
-    ? [RegexRepeatingToken<never, 1, -1>, Unparsed]
-    : RegEx extends `*${infer Unparsed}`
-    ? [RegexRepeatingToken<never, 0, -1>, Unparsed]
-    : RegEx extends `?${infer Unparsed}`
-    ? [RegexRepeatingToken<never, 0, 1>, Unparsed]
+    : RegEx extends `${infer Special extends REGEX_SPECIAL}${infer Unparsed}`
+    ? [CheckSpecial<Special>, Unparsed]
+    : RegEx extends `\\${infer Literal}${infer Unparsed}`
+    ? [CheckLiteral<Literal>, Unparsed]
     : RegEx extends `${infer Literal}${infer Unparsed}`
     ? [RegexLiteralToken<Literal>, Unparsed]
     : never;
+
+type REGEX_SPECIAL = "." | "+" | "*" | "?";
+
+type REGEX_ANY = RegexRangeToken<string>;
+type REGEX_WORD = RegexRangeToken<ParseRange<"a-zA-Z0-9_">>;
+type REGEX_DIGIT = RegexRangeToken<ParseRange<"0-9">>;
+type REGEX_WHITESPACE = RegexRangeToken<"\t" | " ">;
+
+type REGEX_ONE_OR_MORE = RegexRepeatingToken<never, 1, -1>;
+type REGEX_ZERO_OR_MORE = RegexRepeatingToken<never, 0, -1>;
+type REGEX_ZERO_OR_ONE = RegexRepeatingToken<never, 0, 1>;
+
+/**
+ * Map special character sets
+ */
+type CheckSpecial<Special extends REGEX_SPECIAL> = Special extends "."
+  ? REGEX_ANY
+  : Special extends "+"
+  ? REGEX_ONE_OR_MORE
+  : Special extends "*"
+  ? REGEX_ZERO_OR_MORE
+  : Special extends "?"
+  ? REGEX_ZERO_OR_ONE
+  : never;
+
+/**
+ * Check literal escape vs supported sets
+ */
+type CheckLiteral<Literal extends string> = Literal extends "w"
+  ? REGEX_WORD
+  : Literal extends "s"
+  ? REGEX_WHITESPACE
+  : Literal extends "d"
+  ? REGEX_DIGIT
+  : RegexLiteralToken<Literal>; // Check a word
 
 /**
  * Parse a repeating token: {2,3}
@@ -170,6 +203,9 @@ type ParseRange<Range extends string> =
       : Token | ParseRange<Rest>
     : never;
 
+/**
+ * Verify the range is valid and fits our hard coded sets
+ */
 type VerifyRange<
   Start extends string,
   End extends string
