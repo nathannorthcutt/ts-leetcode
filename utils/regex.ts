@@ -1,4 +1,5 @@
 import type { GTE, Increment, LTE } from "./math.js";
+import type { IsPartialGroup, Split, SplitGroups } from "./strings.js";
 
 /**
  * Validate the candidate against the regex and return the candidate if there is
@@ -100,7 +101,7 @@ type CollapseRegexTokens<Tokens> = Tokens extends [
   infer Second,
   ...infer Rest
 ]
-  ? Second extends RegexRepeatingToken<infer _, infer Min, infer Max>
+  ? Second extends RegexRepeatingToken<never, infer Min, infer Max>
     ? Rest extends never[]
       ? [RegexRepeatingToken<First, Min, Max>]
       : [RegexRepeatingToken<First, Min, Max>, ...CollapseRegexTokens<Rest>]
@@ -121,6 +122,116 @@ type ParseRegex<RegEx extends string> = RegEx extends ""
     ? [Token, ...Tokens]
     : [Token]
   : never;
+
+// Need to recursively split the tokens
+
+type s = "\\s+|([a-z]*|[0-9]+)+|\\d{2,}";
+
+// 1. Split out any alternates
+// 2. Split out any groups
+
+// 3. Recursively call for each segment
+// 4. If no new segments generated, process tokens
+
+type ca = IsLeaf<s>;
+
+type cb = SplitTokens<s>;
+
+type IsLeaf<RegEx extends string> = SplitAlternates<RegEx> extends [RegEx]
+  ? SplitCaptureGroups<RegEx> extends [RegEx]
+    ? true
+    : false
+  : false;
+
+type SplitCaptureGroups<RegEx extends string> = SplitGroups<RegEx, "(", ")">;
+
+type SplitTokens<RegEx extends string> = IsLeaf<RegEx> extends true
+  ? ParseRegex<RegEx>
+  : CollapseAlternates<SplitAlternates<RegEx>>;
+
+type sg = ExtractAlternates<"abc([a-z]*|[A-Z]+)+">;
+
+type eg = ExtractAlternates<"\\d{2,}|abc([a-z]*|[A-Z]+)+">;
+type eg2 = ExtractAlternates<"\\d{2,}|[a-z]*|[A-Z]+">;
+
+type ExtractGroup<RegEx extends string> = IsLeaf<RegEx> extends true
+  ? CollapseRegexTokens<
+      ParseRegex<RegEx>
+    > extends infer Tokens extends RegexToken[]
+    ? Tokens
+    : never
+  : CollapseRegexTokens<
+      ExtractAlternates<RegEx>
+    > extends infer Group extends RegexToken[]
+  ? Group
+  : never;
+
+type ExtractAlternates<RegEx extends string> = IsLeaf<RegEx> extends true
+  ? ParseRegex<RegEx> extends infer Tokens extends RegexToken[]
+    ? Tokens
+    : never
+  : SplitAlternates<RegEx> extends [RegEx]
+  ? CollapseRegexTokens<TranslateGroups<SplitCaptureGroups<RegEx>>>
+  : CollapseRegexTokens<
+      CollapseAlternates<SplitAlternates<RegEx>>
+    > extends infer Alternates extends RegexToken[]
+  ? BuildAlternates<Alternates>
+  : never;
+
+type BuildAlternates<Alternates> = Alternates extends [
+  infer First extends RegexToken,
+  infer Second extends RegexToken,
+  ...infer Rest
+]
+  ? BuildAlternates<
+      [RegexAlternateToken<First, Second>, ...Rest]
+    > extends infer Tokens extends RegexToken[]
+    ? Tokens
+    : never
+  : Alternates;
+
+type CollapseAlternates<Tokens> = Tokens extends [
+  infer First extends string,
+  ...infer Rest
+]
+  ? CollapseRegexTokens<
+      TranslateGroups<SplitCaptureGroups<First>>
+    > extends infer Groups extends RegexToken[]
+    ? Rest extends never[]
+      ? [...Groups]
+      : CollapseAlternates<Rest> extends infer Alternates extends RegexToken[]
+      ? [...Groups, ...Alternates]
+      : never
+    : never
+  : never;
+
+type TranslateGroups<Groups> = Groups extends [
+  infer Next extends string,
+  ...infer Rest
+]
+  ? Rest extends never[]
+    ? [...ExtractGroup<Next>]
+    : TranslateGroups<Rest> extends infer Tokens extends RegexToken[]
+    ? [...ExtractGroup<Next>, ...Tokens]
+    : never
+  : never;
+
+type SplitAlternates<RegEx extends string> = Split<
+  RegEx,
+  "|"
+> extends infer Tokens extends string[]
+  ? RejoinPartial<Tokens, "|">
+  : never;
+
+type RejoinPartial<Tokens, C extends string> = Tokens extends [
+  infer First extends string,
+  infer Second extends string,
+  ...infer Rest
+]
+  ? IsPartialGroup<First, "(", ")"> extends true
+    ? RejoinPartial<[`${First}${C}${Second}`, ...Rest], C>
+    : [First, ...RejoinPartial<[Second, ...Rest], C>]
+  : Tokens;
 
 /**
  * Read the next regex token from the string
@@ -240,12 +351,32 @@ type BuildRange<
 type RegexToken =
   | RegexLiteralToken
   | RegexRangeToken
-  | RegexRepeatingToken<any, number, number>;
+  | RegexRepeatingToken<any, number, number>
+  | RegexAlternateToken<any, any>
+  | RegexGroupToken<any>;
+
+/**
+ * A group token
+ */
+type RegexGroupToken<Group extends RegexToken[]> = {
+  type: "group";
+  group: Group;
+};
+
+/**
+ * An alternate token: a|b
+ */
+type RegexAlternateToken<Left extends RegexToken, Right extends RegexToken> = {
+  type: "alternate";
+  left: Left;
+  right: Right;
+};
 
 /**
  * Represents a literal token: A
  */
 type RegexLiteralToken<Literal extends string = string> = {
+  type: "literal";
   literal: Literal;
 };
 
@@ -253,6 +384,7 @@ type RegexLiteralToken<Literal extends string = string> = {
  * Represents a range of characters: [a-Z]
  */
 type RegexRangeToken<Range extends string = string> = {
+  type: "range";
   range: Range;
 };
 
@@ -264,6 +396,7 @@ type RegexRepeatingToken<
   Minimum extends number = 0,
   Maximum extends number = -1
 > = {
+  type: "repeating";
   token: Token;
   min: Minimum;
   max: Maximum;
