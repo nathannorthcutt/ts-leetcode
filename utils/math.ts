@@ -320,7 +320,9 @@ type _GT<L extends SingleDigits, R extends SingleDigits> = L extends "0"
  * Single digit compare for L >= R
  */
 type _GTE<L extends SingleDigits, R extends SingleDigits> = L extends "0"
-  ? true
+  ? R extends "0"
+    ? true
+    : false
   : L extends "1"
   ? R extends "0" | "1"
     ? true
