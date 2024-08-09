@@ -199,8 +199,8 @@ type CheckLength<L extends string, R extends string> = L extends ""
     : -1
   : R extends ""
   ? 1
-  : L extends `${SingleDigits}${infer LR extends string}`
-  ? R extends `${SingleDigits}${infer RR extends string}`
+  : L extends `${infer _}${infer LR extends string}`
+  ? R extends `${infer _}${infer RR extends string}`
     ? CheckLength<LR, RR>
     : 1
   : 0;
@@ -244,7 +244,9 @@ type CheckLHS<
       : never
     : L extends `${infer LS extends SingleDigits}${infer LR extends string}`
     ? R extends `${infer RS extends SingleDigits}${infer RR extends string}`
-      ? _GTE<LS, RS> extends true
+      ? _GT<LS, RS> extends true
+        ? true
+        : LS extends RS
         ? CheckLHS<LR, RR, GTE>
         : false
       : never

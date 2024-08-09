@@ -1,5 +1,5 @@
 import type { GTE, Increment, LTE } from "./math.js";
-import type { IsPartialGroup, Split, SplitGroups } from "./strings.js";
+import type { IsPartialGroup, Replace, Split, SplitGroups } from "./strings.js";
 
 /**
  * Validate the candidate against the regex and return the candidate if there is
@@ -109,7 +109,31 @@ type IsLeaf<RegEx extends string> = SplitAlternates<RegEx> extends [RegEx]
 /**
  * Fast check for SplitGroups with the correct tokens
  */
-type SplitCaptureGroups<RegEx extends string> = SplitGroups<RegEx, "(", ")">;
+type SplitCaptureGroups<RegEx extends string> =
+  RegEx extends `${infer _}\\(${infer _}`
+    ? FixCaptures<
+        SplitGroups<
+          Replace<Replace<RegEx, "\\(", "$__first__$">, "\\)", "$__second__$">,
+          "(",
+          ")"
+        >
+      >
+    : SplitGroups<RegEx, "(", ")">;
+
+/**
+ * Fix mangled captures for escaped parenthesis
+ */
+type FixCaptures<Captures> = Captures extends [
+  infer Next extends string,
+  ...infer Rest
+]
+  ? Rest extends []
+    ? [Replace<Replace<Next, "$__first__$", "\\(">, "$__second__$", "\\)">]
+    : [
+        Replace<Replace<Next, "$__first__$", "\\(">, "$__second__$", "\\)">,
+        ...FixCaptures<Rest>
+      ]
+  : never;
 
 /**
  * Extract a group of tokens
@@ -118,9 +142,20 @@ type ExtractGroup<Original extends string> = IsLeaf<Original> extends true
   ? CollapseRegexTokens<
       ParseRegex<Original>
     > extends infer Tokens extends RegexToken[]
-    ? Tokens
+    ? ValidateGroup<Tokens>
     : never
   : [RegEx<Original>];
+
+type ValidateGroup<Tokens extends RegexToken[]> = Tokens extends [
+  infer SingleToken extends RegexToken
+]
+  ? [SingleToken]
+  : Tokens extends [
+      infer Repeating extends RegexRepeatingToken<never, number, number>,
+      ...infer Rest extends RegexToken[]
+    ]
+  ? [Repeating, ...ValidateGroup<Rest>]
+  : [RegexGroupToken<Tokens>];
 
 /**
  * Build the alternates from the groups
@@ -148,13 +183,11 @@ type CollapseAlternates<Tokens> = Tokens extends [
       TranslateGroups<SplitCaptureGroups<First>>
     > extends infer Groups extends RegexToken[]
     ? Rest extends never[]
-      ? Groups extends [infer Token extends RegexToken]
-        ? [Token]
-        : [RegexGroupToken<Groups>]
+      ? ValidateGroup<Groups>
       : CollapseAlternates<Rest> extends infer Alternates extends RegexToken[]
       ? Groups extends [infer Token extends RegexToken]
         ? [Token, ...Alternates]
-        : [RegexGroupToken<Groups>, ...Alternates]
+        : [...ValidateGroup<Groups>, ...Alternates]
       : never
     : never
   : never;
@@ -176,11 +209,27 @@ type TranslateGroups<Groups> = Groups extends [
 /**
  * Split out all alternate groups
  */
-type SplitAlternates<RegEx extends string> = Split<
-  RegEx,
-  "|"
-> extends infer Tokens extends string[]
-  ? RejoinPartial<Tokens, "|">
+type SplitAlternates<RegEx extends string> =
+  RegEx extends `${infer _}\\|${infer _}`
+    ? FixAlternates<
+        Split<Replace<RegEx, "\\|", "$__alt__$">, "|">
+      > extends infer Tokens extends string[]
+      ? RejoinPartial<Tokens, "|">
+      : never
+    : Split<RegEx, "|"> extends infer Tokens extends string[]
+    ? RejoinPartial<Tokens, "|">
+    : never;
+
+/**
+ * Fix any alternate escaping
+ */
+type FixAlternates<Alternates> = Alternates extends [
+  infer Next extends string,
+  ...infer Rest
+]
+  ? Rest extends never[]
+    ? [Replace<Next, "$__alt__$", "\\|">]
+    : [Replace<Next, "$__alt__$", "\\|">, ...FixAlternates<Rest>]
   : never;
 
 /**
@@ -263,20 +312,15 @@ type ParseRepeating<Repeating extends string> =
     ? RegexRepeatingToken<never, Min, Min>
     : never;
 
-/**
- * Parse a range token: A-Z
- */
 type ParseRange<Range extends string> =
-  Range extends `${infer Start}-${infer End}${infer Other}`
-    ? Other extends ""
-      ? VerifyRange<Start, End>
-      : VerifyRange<Start, End> | ParseRange<Other>
-    : Range extends `${infer Start}-${infer End}`
-    ? VerifyRange<Start, End>
-    : Range extends `${infer Token}${infer Rest}`
-    ? Rest extends ""
-      ? Token
-      : Token | ParseRange<Rest>
+  Range extends `${infer First}${infer Second}${infer Third}${infer Rest}`
+    ? Second extends "-"
+      ? VerifyRange<First, Third> | ParseRange<Rest>
+      : First | ParseRange<`${Second}${Third}${Rest}`>
+    : Range extends `${infer First}${infer Second}${infer Rest}`
+    ? First | Second
+    : Range extends `${infer First}${infer Rest}`
+    ? First
     : never;
 
 /**
@@ -290,8 +334,8 @@ type VerifyRange<
     ? BuildRange<CToN<Start>, CToN<End>> extends infer R extends string
       ? R
       : never
-    : never
-  : never;
+    : Start | "-" | End
+  : Start | "-" | End;
 
 /**
  * Build all the characters in a range
@@ -300,9 +344,7 @@ type BuildRange<
   N extends number,
   End extends number,
   D extends number = 0
-> = D extends 28
-  ? never
-  : NToC<N> extends string
+> = NToC<N> extends string
   ? N extends End
     ? NToC<N>
     : NToC<N> | BuildRange<Increment<N>, End, Increment<D>>
@@ -321,7 +363,7 @@ type RegexToken =
 /**
  * A group token
  */
-type RegexGroupToken<Group extends RegexToken[]> = {
+type RegexGroupToken<Group extends RegexToken[] = any> = {
   type: "group";
   group: Group;
 };
@@ -448,14 +490,14 @@ type RunState<State extends RegexValidationState> =
         ? VerifyResult<Result>
         : false
       : Token extends RegexRepeatingToken
-      ? DFSRepeating<State> extends infer Result
+      ? DFSRepeating2<State> extends infer Result
         ? VerifyResult<Result>
         : false
-      : Token extends RegexAlternateToken<any, any>
+      : Token extends RegexAlternateToken
       ? DFSAlternate<State> extends infer Result
         ? VerifyResult<Result>
         : false
-      : Token extends RegexGroupToken<any>
+      : Token extends RegexGroupToken
       ? DFSGroup<State> extends infer Result
         ? VerifyResult<Result>
         : false
@@ -510,9 +552,10 @@ type DFSLiteral<State extends RegexValidationState> =
     : false;
 
 /**
- * Handle the DFS call chain for a repeating token
+ * Handle the DFS call chain for a repeating token using backtracking for
+ * matches in range
  */
-type DFSRepeating<State extends RegexValidationState> =
+type DFSRepeating2<State extends RegexValidationState> =
   State extends RegexValidationState<
     infer Candidate,
     infer Token,
@@ -520,24 +563,23 @@ type DFSRepeating<State extends RegexValidationState> =
     infer N
   >
     ? Token extends RegexRepeatingToken<infer Repeating, infer Min, infer Max>
-      ? N extends Max // Cap at the max number to read
+      ? RunState<
+          RegexValidationState<Candidate, Repeating, [], 0>
+        > extends infer Returning extends string
+        ? InRange<Increment<N>, Min, Max> extends true
+          ? NextState<
+              Candidate,
+              Rest
+            > extends infer Next extends RegexValidationState
+            ? RunState<Next> extends ""
+              ? Next
+              : RegexValidationState<Returning, Token, Rest, Increment<N>>
+            : RegexValidationState<Returning, Token, Rest, Increment<N>> // No more states
+          : RegexValidationState<Returning, Token, Rest, Increment<N>> // Keep recursive
+        : InRange<N, Min, Max> extends true // Can we keep going ?
         ? NextState<Candidate, Rest>
-        : Candidate extends ""
-        ? InRange<N, Min, Max> extends true
-          ? NextState<Candidate, Rest> // Process the remaining tokens against the empty string
-          : false
-        : RunState<
-            RegexValidationState<Candidate, Repeating, [], 0>
-          > extends infer Returning extends string // Run the next state to check
-        ? Returning extends Candidate
-          ? InRange<N, Min, Max> extends true
-            ? NextState<Returning, Rest>
-            : false
-          : RegexValidationState<Returning, Token, Rest, Increment<N>>
-        : InRange<N, Min, Max> extends true
-        ? NextState<Candidate, Rest>
-        : false
-      : false
+        : false // No more repetition
+      : false // Not repeating
     : false;
 
 /**
@@ -550,12 +592,12 @@ type DFSAlternate<State extends RegexValidationState> =
     infer Rest,
     infer N
   >
-    ? Token extends RegexAlternateToken
-      ? GenerateStates<Candidate, Token, N, Rest> extends infer States
-        ? TryAllStates<States> extends true
-          ? ""
-          : false
-        : false
+    ? Token extends RegexAlternateToken<infer Left, infer Right>
+      ? RunState<
+          RegexValidationState<Candidate, Left, Rest, N>
+        > extends infer Result extends string
+        ? Result
+        : RunState<RegexValidationState<Candidate, Right, Rest, N>>
       : false
     : false;
 
@@ -570,11 +612,14 @@ type DFSGroup<State extends RegexValidationState> =
     infer N
   >
     ? Token extends RegexGroupToken<infer Group>
-      ? GenerateStates<Candidate, Token, N, Rest> extends [
-          infer GroupState extends RegexValidationState
+      ? Group extends [
+          infer First extends RegexToken,
+          ...infer Tokens extends RegexToken[]
         ]
-        ? RunState<GroupState> extends infer Result
-          ? Result
+        ? RunState<
+            RegexValidationState<Candidate, First, Tokens, 0>
+          > extends infer Result extends string
+          ? NextState<Result, Rest>
           : false
         : false
       : false
