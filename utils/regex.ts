@@ -18,50 +18,40 @@ export type ValidateRegEx<
 export type IsMatch<
   Regex extends string,
   Candidate extends string
-> = RegEx<Regex> extends infer Tokens extends RegexToken[]
-  ? RunStateMachine<Candidate, Tokens>
+> = RegEx<Regex> extends infer Tree extends RegexToken
+  ? RunStateMachine<Candidate, Tree>
   : false;
 
 /**
- * Expose the RegEx type
+ * Parse the regex tree from the current point down
  */
-export type RegEx<Regex extends string> =
-  ParseRegex<Regex> extends infer Tokens extends RegexToken[]
-    ? CollapseRegexTokens<Tokens>
-    : never;
-
-/**
- * Check if the string matches the given tokens
- */
-type RunStateMachine<
-  Candidate extends string,
-  Tokens,
-  N extends number = 0
-> = Tokens extends never[]
-  ? Candidate extends ""
-    ? true
-    : false
-  : Candidate extends `${infer NextChar}${infer Rest}`
-  ? Tokens extends [infer Token extends RegexToken, ...infer RemainingTokens]
-    ? CheckMatch<NextChar, Token> extends true
-      ? Rest extends ""
-        ? true
-        : RunStateMachine<Rest, RemainingTokens>
-      : Token extends RegexRepeatingToken<infer RT, infer Min, infer Max>
-      ? CheckMatch<NextChar, RT> extends true
-        ? RunStateMachine<Rest, Tokens, Increment<N>>
-        : InRange<N, Min, Max> extends true
-        ? RunStateMachine<Candidate, RemainingTokens>
-        : "Range exceeded"
-      : RunStateMachine<Candidate, RemainingTokens>
-    : `exhausted tokens: ${Candidate}` // No more tokens but string remains
-  : Tokens extends [infer Token extends RegexToken, ...infer RemainingTokens]
-  ? Token extends RegexRepeatingToken<infer _, infer Min, infer Max>
-    ? InRange<N, Min, Max> extends true
-      ? RunStateMachine<Candidate, RemainingTokens>
-      : "Failed to satisfy range"
-    : "string exhausted before tokens consumed"
-  : "failed to match regex"; // Invalid string
+export type RegEx<RegEx extends string> = IsLeaf<RegEx> extends true
+  ? CollapseRegexTokens<
+      ParseRegex<RegEx>
+    > extends infer Tokens extends RegexToken[]
+    ? Tokens extends [infer SingleToken extends RegexToken]
+      ? SingleToken
+      : RegexGroupToken<Tokens>
+    : never
+  : SplitAlternates<RegEx> extends [RegEx] // No alternates
+  ? CollapseRegexTokens<
+      TranslateGroups<SplitCaptureGroups<RegEx>>
+    > extends infer Tokens extends RegexToken[]
+    ? Tokens extends [infer SingleToken extends RegexToken]
+      ? SingleToken
+      : RegexGroupToken<Tokens>
+    : never
+  : CollapseRegexTokens<
+      CollapseAlternates<SplitAlternates<RegEx>>
+    > extends infer Alternates extends RegexToken[]
+  ? CollapseRegexTokens<
+      BuildAlternates<Alternates>
+    > extends infer Tokens extends RegexToken[]
+    ? Tokens extends [infer SingleToken extends RegexToken]
+      ? SingleToken
+      : RegexGroupToken<Tokens>
+    : never
+  : never;
 
 /**
  * Verify if the number is in range after failing a match check (Min <= N <= Max)
@@ -73,22 +63,6 @@ type InRange<N extends number, Min extends number, Max extends number> = GTE<
   ? Max extends -1
     ? true
     : LTE<N, Max> extends true
-    ? true
-    : false
-  : false;
-
-/**
- * Check if the token is match for the current character
- */
-type CheckMatch<
-  C extends string,
-  T extends RegexToken
-> = T extends RegexLiteralToken<infer L>
-  ? C extends L
-    ? true
-    : false
-  : T extends RegexRangeToken<infer R>
-  ? C extends R
     ? true
     : false
   : false;
@@ -140,44 +114,13 @@ type SplitCaptureGroups<RegEx extends string> = SplitGroups<RegEx, "(", ")">;
 /**
  * Extract a group of tokens
  */
-type ExtractGroup<RegEx extends string> = IsLeaf<RegEx> extends true
+type ExtractGroup<Original extends string> = IsLeaf<Original> extends true
   ? CollapseRegexTokens<
-      ParseRegex<RegEx>
+      ParseRegex<Original>
     > extends infer Tokens extends RegexToken[]
     ? Tokens
     : never
-  : [ParseRegexTree<RegEx>];
-
-/**
- * Parse the regex tree from the current point down
- */
-type ParseRegexTree<RegEx extends string> = IsLeaf<RegEx> extends true
-  ? CollapseRegexTokens<
-      ParseRegex<RegEx>
-    > extends infer Tokens extends RegexToken[]
-    ? Tokens extends [infer SingleToken extends RegexToken]
-      ? SingleToken
-      : RegexGroupToken<Tokens>
-    : never
-  : SplitAlternates<RegEx> extends [RegEx] // No alternates
-  ? CollapseRegexTokens<
-      TranslateGroups<SplitCaptureGroups<RegEx>>
-    > extends infer Tokens extends RegexToken[]
-    ? Tokens extends [infer SingleToken extends RegexToken]
-      ? SingleToken
-      : RegexGroupToken<Tokens>
-    : never
-  : CollapseRegexTokens<
-      CollapseAlternates<SplitAlternates<RegEx>>
-    > extends infer Alternates extends RegexToken[]
-  ? CollapseRegexTokens<
-      BuildAlternates<Alternates>
-    > extends infer Tokens extends RegexToken[]
-    ? Tokens extends [infer SingleToken extends RegexToken]
-      ? SingleToken
-      : RegexGroupToken<Tokens>
-    : never
-  : never;
+  : [RegEx<Original>];
 
 /**
  * Build the alternates from the groups
@@ -386,7 +329,10 @@ type RegexGroupToken<Group extends RegexToken[]> = {
 /**
  * An alternate token: a|b
  */
-type RegexAlternateToken<Left extends RegexToken, Right extends RegexToken> = {
+type RegexAlternateToken<
+  Left extends RegexToken = any,
+  Right extends RegexToken = any
+> = {
   type: "alternate";
   left: Left;
   right: Right;
@@ -421,6 +367,258 @@ type RegexRepeatingToken<
   min: Minimum;
   max: Maximum;
 };
+
+/**
+ * A potential branch towards a solution
+ */
+type RegexValidationState<
+  Candidate extends string = string,
+  Current extends RegexToken = any,
+  Remaining extends RegexToken[] = any,
+  Depth extends number = number
+> = {
+  candidate: Candidate;
+  current: Current;
+  remaining: Remaining;
+  depth: Depth;
+};
+
+/**
+ * Run a literal token against the candidate
+ */
+type RunLiteral<
+  Candidate extends string,
+  Token extends RegexToken
+> = Token extends RegexLiteralToken<infer Literal>
+  ? Candidate extends `${infer _ extends Literal}${infer Remainder}`
+    ? Remainder
+    : Candidate
+  : Candidate;
+
+/**
+ * Run a range token against the candidate
+ */
+type RunRange<
+  Candidate extends string,
+  Token extends RegexToken
+> = Token extends RegexRangeToken<infer Range>
+  ? Candidate extends `${infer _ extends Range}${infer Remainder}`
+    ? Remainder
+    : Candidate
+  : Candidate;
+
+/**
+ * Run a DFS exploration on a candidate token
+ */
+type RunStateMachine<
+  Candidate extends string,
+  Token extends RegexToken
+> = GenerateStates<
+  Candidate,
+  Token
+> extends infer States extends RegexValidationState[]
+  ? TryAllStates<States>
+  : never;
+
+/**
+ * Run the DFS operation across all available states
+ */
+type TryAllStates<States> = States extends [
+  infer Next extends RegexValidationState,
+  ...infer Rest
+]
+  ? RunState<Next> extends "" // Verify we consumed the entire string
+    ? true
+    : Rest extends never[]
+    ? false
+    : TryAllStates<Rest> // Check the next potential state
+  : never;
+
+/**
+ * Check the current state for a valid result
+ */
+type RunState<State extends RegexValidationState> =
+  State extends RegexValidationState<string, infer Token, any, number>
+    ? Token extends RegexLiteralToken
+      ? DFSLiteral<State> extends infer Result
+        ? VerifyResult<Result>
+        : false
+      : Token extends RegexRangeToken
+      ? DFSRange<State> extends infer Result
+        ? VerifyResult<Result>
+        : false
+      : Token extends RegexRepeatingToken
+      ? DFSRepeating<State> extends infer Result
+        ? VerifyResult<Result>
+        : false
+      : Token extends RegexAlternateToken<any, any>
+      ? DFSAlternate<State> extends infer Result
+        ? VerifyResult<Result>
+        : false
+      : Token extends RegexGroupToken<any>
+      ? DFSGroup<State> extends infer Result
+        ? VerifyResult<Result>
+        : false
+      : false
+    : false;
+
+/**
+ * Verify or call further down the state result chain
+ */
+type VerifyResult<Result> = Result extends RegexValidationState
+  ? RunState<Result> extends infer R
+    ? R
+    : false
+  : Result;
+
+/**
+ * DFS on a range node
+ */
+type DFSRange<State extends RegexValidationState> =
+  State extends RegexValidationState<
+    infer Candidate,
+    infer Token,
+    infer Rest,
+    infer _
+  >
+    ? Token extends RegexRangeToken
+      ? RunRange<Candidate, Token> extends infer Returning extends string
+        ? Returning extends Candidate
+          ? false
+          : NextState<Returning, Rest>
+        : false
+      : false
+    : false;
+
+/**
+ * Handle DFS call chain for a literal
+ */
+type DFSLiteral<State extends RegexValidationState> =
+  State extends RegexValidationState<
+    infer Candidate,
+    infer Token,
+    infer Rest,
+    infer _
+  >
+    ? Token extends RegexLiteralToken
+      ? RunLiteral<Candidate, Token> extends infer Returning extends string
+        ? Returning extends Candidate
+          ? false
+          : NextState<Returning, Rest>
+        : false
+      : false
+    : false;
+
+/**
+ * Handle the DFS call chain for a repeating token
+ */
+type DFSRepeating<State extends RegexValidationState> =
+  State extends RegexValidationState<
+    infer Candidate,
+    infer Token,
+    infer Rest,
+    infer N
+  >
+    ? Token extends RegexRepeatingToken<infer Repeating, infer Min, infer Max>
+      ? N extends Max // Cap at the max number to read
+        ? NextState<Candidate, Rest>
+        : Candidate extends ""
+        ? InRange<N, Min, Max> extends true
+          ? NextState<Candidate, Rest> // Process the remaining tokens against the empty string
+          : false
+        : RunState<
+            RegexValidationState<Candidate, Repeating, [], 0>
+          > extends infer Returning extends string // Run the next state to check
+        ? Returning extends Candidate
+          ? InRange<N, Min, Max> extends true
+            ? NextState<Returning, Rest>
+            : false
+          : RegexValidationState<Returning, Token, Rest, Increment<N>>
+        : InRange<N, Min, Max> extends true
+        ? NextState<Candidate, Rest>
+        : false
+      : false
+    : false;
+
+/**
+ * Run the DFS on the alternates
+ */
+type DFSAlternate<State extends RegexValidationState> =
+  State extends RegexValidationState<
+    infer Candidate,
+    infer Token,
+    infer Rest,
+    infer N
+  >
+    ? Token extends RegexAlternateToken
+      ? GenerateStates<Candidate, Token, N, Rest> extends infer States
+        ? TryAllStates<States> extends true
+          ? ""
+          : false
+        : false
+      : false
+    : false;
+
+/**
+ * Run the DFS over the group
+ */
+type DFSGroup<State extends RegexValidationState> =
+  State extends RegexValidationState<
+    infer Candidate,
+    infer Token,
+    infer Rest,
+    infer N
+  >
+    ? Token extends RegexGroupToken<infer Group>
+      ? GenerateStates<Candidate, Token, N, Rest> extends [
+          infer GroupState extends RegexValidationState
+        ]
+        ? RunState<GroupState> extends infer Result
+          ? Result
+          : false
+        : false
+      : false
+    : false;
+
+/**
+ * Generate the valid states from a given token
+ */
+type GenerateStates<
+  Candidate extends string,
+  Token extends RegexToken,
+  N extends number = 0,
+  Remaining extends RegexToken[] = []
+> = Token extends RegexAlternateToken<infer Left, infer Right>
+  ? [
+      RegexValidationState<Candidate, Left, Remaining, N>,
+      RegexValidationState<Candidate, Right, Remaining, N>
+    ]
+  : Token extends RegexGroupToken<infer Group>
+  ? Group extends [infer SingleToken extends RegexToken]
+    ? [RegexValidationState<Candidate, SingleToken, Remaining, N>]
+    : Group extends [
+        infer Next extends RegexToken,
+        ...infer Rest extends RegexToken[]
+      ]
+    ? [RegexValidationState<Candidate, Next, [...Rest, ...Remaining], N>]
+    : never
+  : [RegexValidationState<Candidate, Token, Remaining, N>];
+
+/**
+ * Get the next available state
+ */
+type NextState<
+  Candidate extends string,
+  Tokens extends RegexToken[],
+  Counter extends number = 0
+> = Tokens extends [infer SingleToken extends RegexToken]
+  ? RegexValidationState<Candidate, SingleToken, [], Counter>
+  : Tokens extends [
+      infer NextToken extends RegexToken,
+      ...infer Rest extends RegexToken[]
+    ]
+  ? RegexValidationState<Candidate, NextToken, Rest, Counter>
+  : Candidate;
 
 /**
  * Get the value for the character
@@ -641,218 +839,3 @@ type CharToIdx = {
   "}": 96;
   "~": 97;
 };
-
-/**
- * Run a literal token against the candidate
- */
-type RunLiteral<
-  Candidate extends string,
-  Token extends RegexToken
-> = Token extends RegexLiteralToken<infer Literal>
-  ? Candidate extends `${infer _ extends Literal}${infer Remainder}`
-    ? Remainder
-    : Candidate
-  : Candidate;
-
-/**
- * Run a range token against the candidate
- */
-type RunRange<
-  Candidate extends string,
-  Token extends RegexToken
-> = Token extends RegexRangeToken<infer Range>
-  ? Candidate extends `${infer _ extends Range}${infer Remainder}`
-    ? Remainder
-    : Candidate
-  : Candidate;
-
-/**
- * A potential branch towards a solution
- */
-type RegexValidationState<
-  Candidate extends string = string,
-  Current extends RegexToken = any,
-  Remaining extends RegexToken[] = any,
-  Depth extends number = number
-> = {
-  candidate: Candidate;
-  current: Current;
-  remaining: Remaining;
-  depth: Depth;
-};
-
-/**
- * Run the DFS on a candidate token
- */
-type DFS<Candidate extends string, Token extends RegexToken> = GenerateStates<
-  Candidate,
-  Token
-> extends infer States extends RegexValidationState[]
-  ? StateDFS<States>
-  : never;
-
-/**
- * Run the DFS operation across all available states
- */
-type StateDFS<States> = States extends [
-  infer Next extends RegexValidationState,
-  ...infer Rest
-]
-  ? RunState<Next> extends infer R extends string
-    ? R
-    : Rest extends never[]
-    ? false
-    : StateDFS<Rest>
-  : never;
-
-/**
- * Check the current state for a valid result
- */
-type RunState<State extends RegexValidationState> =
-  State extends RegexValidationState<string, infer Token, any, number>
-    ? Token extends RegexLiteralToken
-      ? DFSLiteral<State> extends infer Result
-        ? VerifyResult<Result>
-        : false
-      : Token extends RegexRangeToken
-      ? DFSRange<State> extends infer Result
-        ? VerifyResult<Result>
-        : false
-      : Token extends RegexRepeatingToken
-      ? DFSRepeating<State> extends infer Result
-        ? VerifyResult<Result>
-        : false
-      : false
-    : false;
-
-/**
- * Verify or call further down the state result chain
- */
-type VerifyResult<Result> = Result extends RegexValidationState
-  ? RunState<Result> extends infer R
-    ? R
-    : false
-  : Result;
-
-/**
- * DFS on a range node
- */
-type DFSRange<State extends RegexValidationState> =
-  State extends RegexValidationState<
-    infer Candidate,
-    infer Token,
-    infer Rest,
-    infer _
-  >
-    ? Token extends RegexRangeToken
-      ? RunRange<Candidate, Token> extends infer Returning extends string
-        ? Returning extends Candidate
-          ? false
-          : NextState<Returning, Rest>
-        : false
-      : false
-    : false;
-
-/**
- * Handle DFS call chain for a literal
- */
-type DFSLiteral<State extends RegexValidationState> =
-  State extends RegexValidationState<
-    infer Candidate,
-    infer Token,
-    infer Rest,
-    infer _
-  >
-    ? Token extends RegexLiteralToken
-      ? RunLiteral<Candidate, Token> extends infer Returning extends string
-        ? Returning extends Candidate
-          ? false
-          : NextState<Returning, Rest>
-        : false
-      : false
-    : false;
-
-/**
- * Handle the DFS call chain for a repeating token
- */
-type DFSRepeating<State extends RegexValidationState> =
-  State extends RegexValidationState<
-    infer Candidate,
-    infer Token,
-    infer Rest,
-    infer N
-  >
-    ? Token extends RegexRepeatingToken<infer Repeating, infer Min, infer Max>
-      ? N extends Max // Cap at the max number to read
-        ? NextState<Candidate, Rest>
-        : Candidate extends ""
-        ? InRange<N, Min, Max> extends true
-          ? NextState<Candidate, Rest> // Process the remaining tokens against the empty string
-          : false
-        : RunState<
-            RegexValidationState<Candidate, Repeating, [], 0>
-          > extends infer Returning extends string // Run the next state to check
-        ? Returning extends Candidate
-          ? InRange<N, Min, Max> extends true
-            ? NextState<Returning, Rest>
-            : false
-          : RegexValidationState<Returning, Token, Rest, Increment<N>>
-        : InRange<N, Min, Max> extends true
-        ? NextState<Candidate, Rest>
-        : false
-      : false
-    : false;
-
-/**
- * Generate the valid states from a given token
- */
-type GenerateStates<
-  Candidate extends string,
-  Token extends RegexToken,
-  N extends number = 0
-> = Token extends RegexAlternateToken<infer Left, infer Right>
-  ? [
-      RegexValidationState<Candidate, Left, [], 0>,
-      RegexValidationState<Candidate, Right, [], 0>
-    ]
-  : Token extends RegexGroupToken<infer Group>
-  ? Group extends [infer SingleToken extends RegexToken]
-    ? [RegexValidationState<Candidate, SingleToken>]
-    : Group extends [
-        infer Next extends RegexToken,
-        ...infer Rest extends RegexToken[]
-      ]
-    ? [RegexValidationState<Candidate, Next, Rest, 0>]
-    : never
-  : [RegexValidationState<Candidate, Token, [], N>];
-
-/**
- * Get the next available state
- */
-type NextState<
-  Candidate extends string,
-  Tokens extends RegexToken[],
-  Counter extends number = 0
-> = Tokens extends [infer SingleToken extends RegexToken]
-  ? RegexValidationState<Candidate, SingleToken, [], Counter>
-  : Tokens extends [
-      infer NextToken extends RegexToken,
-      ...infer Rest extends RegexToken[]
-    ]
-  ? RegexValidationState<Candidate, NextToken, Rest, Counter>
-  : Candidate;
-
-type T = ParseRegexTree<"abc([a-z]*|[A-Z]+)+">;
-
-type T2 = ParseRegexTree<"[a-f]{1,5}">;
-
-type d = DFS<"aeff", T2>;
-
-type g = GenerateStates<"aefk", T2>;
-
-type r = DFSRepeating<g[0]>;
-type r2 = DFSRepeating<r>;
-type r3 = DFSRepeating<r2>;
-type r4 = DFSRepeating<r3>;
-
-type r5 = RunState<r>;
