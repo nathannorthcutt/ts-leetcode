@@ -1,6 +1,20 @@
 import type { Decrement, GT, Increment, LT } from "./math.js";
 
 /**
+ * Join all of the strings using the given join (default ' ')
+ */
+export type Join<T extends string[], Token extends string = " "> = T extends [
+  infer Next extends string,
+  ...infer Rest
+]
+  ? Rest extends never[]
+    ? Next
+    : Rest extends string[]
+    ? `${Next}${Token}${Join<Rest, Token>}`
+    : ""
+  : "";
+
+/**
  * Trim excess whitespace
  */
 export type Trim<Original> = Original extends ` ${infer Rest}`
