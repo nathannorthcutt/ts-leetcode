@@ -1,4 +1,3 @@
-import type { Add, Increment } from "../../utils/math.js";
 import type { Board, BoardPosition } from "./common.js";
 
 /**
@@ -98,30 +97,24 @@ type Contains<
   : never;
 
 /**
- * Utility type to build a SubMatrix map of all board positions in that matrix
- */
-type BuildSubMatrix<
-  Row extends number,
-  Column extends number,
-  R extends number = 0,
-  C extends number = 0
-> = R extends 3
-  ? []
-  : C extends 3
-  ? BuildSubMatrix<Row, Column, Increment<R>, 0>
-  : Add<Row, R> extends infer NR extends number
-  ? Add<Column, C> extends infer NC extends number
-    ? [BoardPosition<NR, NC>, ...BuildSubMatrix<Row, Column, R, Increment<C>>]
-    : never
-  : never;
-
-/**
- * Get the positions for each board sub-matrix
+ * Pre-computed sub-matrix positions (eliminates recursive BuildSubMatrix + Add calls)
  */
 type SubMatrixPositions = [
-  [BuildSubMatrix<0, 0>, BuildSubMatrix<0, 3>, BuildSubMatrix<0, 6>],
-  [BuildSubMatrix<3, 0>, BuildSubMatrix<3, 3>, BuildSubMatrix<3, 6>],
-  [BuildSubMatrix<6, 0>, BuildSubMatrix<6, 3>, BuildSubMatrix<6, 6>]
+  [
+    [BoardPosition<0,0>, BoardPosition<0,1>, BoardPosition<0,2>, BoardPosition<1,0>, BoardPosition<1,1>, BoardPosition<1,2>, BoardPosition<2,0>, BoardPosition<2,1>, BoardPosition<2,2>],
+    [BoardPosition<0,3>, BoardPosition<0,4>, BoardPosition<0,5>, BoardPosition<1,3>, BoardPosition<1,4>, BoardPosition<1,5>, BoardPosition<2,3>, BoardPosition<2,4>, BoardPosition<2,5>],
+    [BoardPosition<0,6>, BoardPosition<0,7>, BoardPosition<0,8>, BoardPosition<1,6>, BoardPosition<1,7>, BoardPosition<1,8>, BoardPosition<2,6>, BoardPosition<2,7>, BoardPosition<2,8>]
+  ],
+  [
+    [BoardPosition<3,0>, BoardPosition<3,1>, BoardPosition<3,2>, BoardPosition<4,0>, BoardPosition<4,1>, BoardPosition<4,2>, BoardPosition<5,0>, BoardPosition<5,1>, BoardPosition<5,2>],
+    [BoardPosition<3,3>, BoardPosition<3,4>, BoardPosition<3,5>, BoardPosition<4,3>, BoardPosition<4,4>, BoardPosition<4,5>, BoardPosition<5,3>, BoardPosition<5,4>, BoardPosition<5,5>],
+    [BoardPosition<3,6>, BoardPosition<3,7>, BoardPosition<3,8>, BoardPosition<4,6>, BoardPosition<4,7>, BoardPosition<4,8>, BoardPosition<5,6>, BoardPosition<5,7>, BoardPosition<5,8>]
+  ],
+  [
+    [BoardPosition<6,0>, BoardPosition<6,1>, BoardPosition<6,2>, BoardPosition<7,0>, BoardPosition<7,1>, BoardPosition<7,2>, BoardPosition<8,0>, BoardPosition<8,1>, BoardPosition<8,2>],
+    [BoardPosition<6,3>, BoardPosition<6,4>, BoardPosition<6,5>, BoardPosition<7,3>, BoardPosition<7,4>, BoardPosition<7,5>, BoardPosition<8,3>, BoardPosition<8,4>, BoardPosition<8,5>],
+    [BoardPosition<6,6>, BoardPosition<6,7>, BoardPosition<6,8>, BoardPosition<7,6>, BoardPosition<7,7>, BoardPosition<7,8>, BoardPosition<8,6>, BoardPosition<8,7>, BoardPosition<8,8>]
+  ]
 ];
 
 /**
