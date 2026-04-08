@@ -29,8 +29,7 @@
     "strict": true,
     "strictFunctionTypes": true,
     "strictNullChecks": true,
-    "target": "ESNext",
-    "baseUrl": "./"
+    "target": "ESNext"
   },
   "include": ["./**/*.ts"],
   "exclude": ["dist"],

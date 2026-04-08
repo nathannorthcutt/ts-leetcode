@@ -49,20 +49,16 @@ export type SortState<Current extends State> = Current extends State<
   : never;
 
 /**
- * Verify the state has all digit values present
+ * Verify the state has all digit values present.
+ * Uses mapped types instead of intersection + Flatten to fill missing keys.
  */
 type CheckState<
   Counter extends RemainingCounter,
   Placed extends ValuePositions
-> = Flatten<
-  Counter & { [Key in MissingKeys<Extract<keyof Counter, Digits>>]: 9 }
-> extends infer C extends RemainingCounter
-  ? Flatten<
-      Placed & { [Key in MissingKeys<Extract<keyof Placed, Digits>>]: [] }
-    > extends infer P extends ValuePositions
-    ? State<C, P>
-    : never
-  : never;
+> = State<
+  { [Key in Digits]: Key extends keyof Counter ? Counter[Key] : 9 },
+  { [Key in Digits]: Key extends keyof Placed ? Placed[Key] : [] }
+>;
 
 /**
  * Utility to find the missing keys
@@ -80,15 +76,10 @@ type UpdateStatePosition<
   Row extends number,
   Column extends number
 > = InitialState extends State<infer C, infer P>
-  ? Flatten<
-      UpdateCounter<C, Value>
-    > extends infer Counter extends RemainingCounter
-    ? Flatten<
-        AddPosition<P, Value, BoardPosition<Row, Column>>
-      > extends infer Positions extends ValuePositions
-      ? State<Counter, Positions>
-      : never
-    : never
+  ? State<
+      UpdateCounter<C, Value>,
+      AddPosition<P, Value, BoardPosition<Row, Column>>
+    >
   : never;
 
 /**
